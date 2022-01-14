@@ -1,0 +1,98 @@
+version: '2'
+services:
+  zookeeper:
+    image: debezium/zookeeper:1.8
+
+  kafka:
+    image: debezium/kafka:1.8
+    depends_on:
+      - zookeeper
+    environment:
+      ZOOKEEPER_CONNECT: zookeeper:2181
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.0.1
+    hostname: schema-registry
+    depends_on:
+      - kafka
+      - connect
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: kafka:9092
+      SCHEMA_REGISTRY_LISTENERS: http://0.0.0.0:8081
+
+  connect:
+    build:
+      context: .
+      dockerfile: kafka-connect.Dockerfile
+    ports:
+      - "8083:8083"
+    depends_on:
+      - kafka
+      - app-db
+      - target-db
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: kafka:9092
+      CONNECT_REST_ADVERTISED_HOST_NAME: connect
+      CONNECT_REST_PORT: 8083
+      CONNECT_GROUP_ID: compose-connect-group
+      CONNECT_CONFIG_STORAGE_TOPIC: docker-connect-configs
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_FLUSH_INTERVAL_MS: 10000
+      CONNECT_OFFSET_STORAGE_TOPIC: docker-connect-offsets
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_TOPIC: docker-connect-status
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_VALUE_CONVERTER: io.confluent.connect.protobuf.ProtobufConverter
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      CONNECT_PLUGIN_PATH: "/usr/share/java,/usr/share/confluent-hub-components"
+      CONNECT_LOG4J_LOGGERS: org.apache.zookeeper=ERROR,org.I0Itec.zkclient=ERROR,org.reflections=ERROR
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:0.3.1
+    hostname: 'kafka-ui'
+    ports:
+      - "8080:8080"
+    depends_on:
+      - kafka
+      - connect
+      - schema-registry
+    environment:
+      KAFKA_CLUSTERS_0_NAME: local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+      KAFKA_CLUSTERS_0_SCHEMAREGISTRY: schema-registry:8081
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_NAME: local
+      KAFKA_CLUSTERS_0_KAFKACONNECT_0_ADDRESS: http://connect:8083
+
+  app:
+    build:
+      context: .
+      dockerfile: python-app.Dockerfile
+    depends_on:
+      - app-db
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./webapp:/app
+    environment:
+      FLASK_ENV: development
+      SCHEMA_REGISTRY_URL: http://schema-registry:8081
+      KAFKA_TOPIC: customers_topic
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_HOST: app-db
+      POSTGRES_PORT: 5432
+      POSTGRES_DATABASE: postgres
+
+  app-db:
+    image: debezium/example-postgres:1.8
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+
+  target-db:
+    image: debezium/example-postgres:1.8
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres

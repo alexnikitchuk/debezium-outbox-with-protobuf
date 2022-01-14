@@ -1,0 +1,6 @@
+confluent-kafka
+protobuf
+psycopg2-binary
+requests
+Faker
+Flask
